@@ -834,9 +834,7 @@ function handleLandingPageLogin(event) {
     
     localStorage.setItem('currentUser', JSON.stringify(user));
     alert('Logged in successfully!\n\nWelcome, ' + user.name + '!');
-    closeAuthModal('loginModal');
-    document.getElementById('landingLoginEmail').value = '';
-    document.getElementById('landingLoginPassword').value = '';
+    window.location.href = 'app.html';
 }
 
 function handleLandingPageSignup(event) {
@@ -896,12 +894,7 @@ function handleLandingPageSignup(event) {
     localStorage.setItem('currentUser', JSON.stringify(newUser));
     
     alert('✅ Account created successfully!\n\nWelcome, ' + name + '!');
-    closeAuthModal('signupModal');
-    
-    document.getElementById('landingSignupName').value = '';
-    document.getElementById('landingSignupEmail').value = '';
-    document.getElementById('landingSignupPassword').value = '';
-    document.getElementById('landingSignupConfirmPassword').value = '';
+    window.location.href = 'app.html';
 }
 
 // ===== FEEDBACK FORM FUNCTION =====
@@ -921,7 +914,7 @@ function handleFeedbackSubmission(event) {
 
 function goToApp(e) {
     if (e) e.preventDefault();
-    alert('Going to App!\n\nIn your full project, this would load the complete application with the Kanban board!');
+    window.location.href = 'app.html';
 }
 
 // Close modal when clicking outside
@@ -942,3 +935,4 @@ console.log('✅ Website loaded successfully!');
 
 </body>
 </html>
+
