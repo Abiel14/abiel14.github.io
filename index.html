@@ -815,7 +815,7 @@ function handleLandingPageLogin(event) {
     
     if (!email || !password) {
         if (errorDiv) {
-            errorDiv.textContent = '❌ Please fill in all fields';
+            errorDiv.textContent = 'Please fill in all fields';
             errorDiv.style.display = 'block';
         }
         return;
@@ -826,14 +826,14 @@ function handleLandingPageLogin(event) {
     
     if (!user) {
         if (errorDiv) {
-            errorDiv.textContent = '❌ Invalid email or password';
+            errorDiv.textContent = 'Invalid email or password';
             errorDiv.style.display = 'block';
         }
         return;
     }
     
     localStorage.setItem('currentUser', JSON.stringify(user));
-    alert('✅ Logged in successfully!\n\nWelcome, ' + user.name + '!');
+    alert('Logged in successfully!\n\nWelcome, ' + user.name + '!');
     closeAuthModal('loginModal');
     document.getElementById('landingLoginEmail').value = '';
     document.getElementById('landingLoginPassword').value = '';
@@ -852,7 +852,7 @@ function handleLandingPageSignup(event) {
     
     if (!name || !email || !password || !confirmPassword) {
         if (errorDiv) {
-            errorDiv.textContent = '❌ Please fill in all fields';
+            errorDiv.textContent = 'Please fill in all fields';
             errorDiv.style.display = 'block';
         }
         return;
@@ -860,7 +860,7 @@ function handleLandingPageSignup(event) {
     
     if (password !== confirmPassword) {
         if (errorDiv) {
-            errorDiv.textContent = '❌ Passwords do not match';
+            errorDiv.textContent = 'Passwords do not match';
             errorDiv.style.display = 'block';
         }
         return;
@@ -868,7 +868,7 @@ function handleLandingPageSignup(event) {
     
     if (password.length < 6) {
         if (errorDiv) {
-            errorDiv.textContent = '❌ Password must be at least 6 characters';
+            errorDiv.textContent = 'Password must be at least 6 characters';
             errorDiv.style.display = 'block';
         }
         return;
@@ -878,7 +878,7 @@ function handleLandingPageSignup(event) {
     
     if (users.find(u => u.email === email)) {
         if (errorDiv) {
-            errorDiv.textContent = '❌ Email already registered';
+            errorDiv.textContent = 'Email has already been registered';
             errorDiv.style.display = 'block';
         }
         return;
@@ -921,7 +921,7 @@ function handleFeedbackSubmission(event) {
 
 function goToApp(e) {
     if (e) e.preventDefault();
-    alert('🚀 Going to App!\n\nIn your full project, this would load the complete application with the Kanban board!');
+    alert('Going to App!\n\nIn your full project, this would load the complete application with the Kanban board!');
 }
 
 // Close modal when clicking outside
