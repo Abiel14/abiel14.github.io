@@ -934,6 +934,16 @@ async function handleLandingPageLogin(event) {
     
     const userName = data.user.user_metadata?.name || 'User';
     alert('Logged in successfully!\n\nWelcome, ' + userName + '!');
+    
+    // Explicitly verify storage before redirecting
+    const storageKey = `sb-${new URL(supabaseUrl).hostname.split('.')[0]}-auth-token`;
+    const sessionExists = localStorage.getItem(storageKey);
+    console.log("Storage Check:", storageKey, sessionExists ? "Found" : "Not Found");
+    
+    if (!sessionExists) {
+        console.warn("Session not found in localStorage immediately after login. This may be a browser storage restriction.");
+    }
+
     setTimeout(() => {
         window.location.href = 'app.html';
     }, 500);
@@ -1068,5 +1078,4 @@ console.log('✅ Website loaded successfully!');
 
 </body>
 </html>
-
 
