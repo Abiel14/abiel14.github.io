@@ -891,7 +891,25 @@
             let retryCount = 0;
             const maxRetries = 10;
             
-            // Function to verify identity with the server (more authoritative)
+            // 1. CHECK URL HASH FOR SESSION (HANDOFF FROM LOGIN PAGE)
+            const hash = window.location.hash;
+            if (hash && hash.includes('access_token=') && hash.includes('refresh_token=')) {
+                console.log("📥 Caught session tokens from URL hash. Setting manual session...");
+                const params = new URLSearchParams(hash.substring(1));
+                const access_token = params.get('access_token');
+                const refresh_token = params.get('refresh_token');
+                
+                if (access_token && refresh_token) {
+                    try {
+                        await supabaseClient.auth.setSession({ access_token, refresh_token });
+                        // Immediately clear the hash for security
+                        history.replaceState(null, document.title, window.location.pathname + window.location.search);
+                        console.log("✅ Manual session set, hash cleared.");
+                    } catch(e) { console.error("Error setting session from hash:", e); }
+                }
+            }
+
+            // 2. HYDRATION POLLING (STANDARD FLOW)
             async function verifyIdentity() {
                 try {
                     const { data: { user }, error } = await supabaseClient.auth.getUser();
@@ -904,7 +922,7 @@
                     if (manualSessionRaw) {
                         const parsed = JSON.parse(manualSessionRaw);
                         if (parsed && parsed.user) {
-                            console.warn("⚠️ Official library failed, but found raw session in storage. Attempting manual set...");
+                            console.warn("⚠️ Found raw session in storage. Attempting manual set...");
                             await supabaseClient.auth.setSession({
                                 access_token: parsed.access_token,
                                 refresh_token: parsed.refresh_token
