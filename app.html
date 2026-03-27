@@ -1,5 +1,4 @@
-
-      <!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -678,13 +677,13 @@
     <div id="authOverlay" class="auth-overlay">
         <div class="auth-card">
             <h2>Session Not Found</h2>
-            <p>We couldn't verify your login. This might be due to a slow connection or a temporary error.</p>
+            <div id="authOverlayMessage" style="margin-bottom: 20px;">We couldn't verify your login. This might be due to a slow connection or a temporary error.</div>
             <div class="btn-row">
                 <button class="btn-retry" onclick="location.reload()">🔄 Retry</button>
-                <button class="btn-home" onclick="logout()">🏠 Sign Out & Restart</button>
+                <button class="btn-home" onclick="hardReset()">🧹 Hard Reset & Restart</button>
             </div>
-            <button onclick="toggleDebugInfo()" style="margin-top: 20px; background: none; border: none; color: var(--text-muted); cursor: pointer; text-decoration: underline; font-size: 12px;">Show Debug Details</button>
-            <div id="debugInfo" style="display: none; margin-top: 15px; text-align: left; background: #000; color: #0f0; padding: 10px; border-radius: 5px; font-family: monospace; font-size: 11px; max-height: 150px; overflow: auto; border: 1px solid #333;"></div>
+            <button onclick="toggleDebugInfo()" style="margin-top: 20px; background: none; border: none; color: var(--text-muted); cursor: pointer; text-decoration: underline; font-size: 12px;">Troubleshoot / Show Details</button>
+            <div id="debugInfo" style="display: none; margin-top: 15px; text-align: left; background: #000; color: #0f0; padding: 10px; border-radius: 5px; font-family: monospace; font-size: 11px; max-height: 200px; overflow: auto; border: 1px solid #333;"></div>
         </div>
     </div>
 
@@ -693,13 +692,31 @@
             const el = document.getElementById('debugInfo');
             el.style.display = el.style.display === 'none' ? 'block' : 'none';
             if (el.style.display === 'block') {
-                const logs = {
-                    localStorage: Object.keys(localStorage).filter(k => k.includes('supabase')),
+                const url = new URL('https://teclqhxbohgljgcqcljq.supabase.co');
+                const slug = url.hostname.split('.')[0];
+                const storageKey = `sb-${slug}-auth-token`;
+                const storageVal = localStorage.getItem(storageKey);
+                
+                const stats = {
+                    localStorageSupported: (typeof Storage !== 'undefined'),
+                    storageKey: storageKey,
+                    sessionFound: !!storageVal,
+                    sessionSnippet: storageVal ? storageVal.substring(0, 50) + "..." : "EMPTY",
                     authDebug: sessionStorage.getItem('authDebug'),
                     timestamp: new Date().toISOString(),
-                    userAgent: navigator.userAgent
+                    origin: window.location.origin
                 };
-                el.textContent = JSON.stringify(logs, null, 2);
+                el.textContent = JSON.stringify(stats, null, 2);
+            }
+        }
+
+        async function hardReset() {
+            if (confirm("This will clear all login data and restart. Proceed?")) {
+                const url = new URL('https://teclqhxbohgljgcqcljq.supabase.co');
+                const slug = url.hostname.split('.')[0];
+                localStorage.removeItem(`sb-${slug}-auth-token`);
+                sessionStorage.clear();
+                window.location.href = "index.html";
             }
         }
     </script>
@@ -879,6 +896,23 @@
                 try {
                     const { data: { user }, error } = await supabaseClient.auth.getUser();
                     if (user) return user;
+                    
+                    // FALLBACK: Manual LocalStorage Parsing (Deep Recovery)
+                    const slug = new URL(supabaseUrl).hostname.split('.')[0];
+                    const storageKey = `sb-${slug}-auth-token`;
+                    const manualSessionRaw = localStorage.getItem(storageKey);
+                    if (manualSessionRaw) {
+                        const parsed = JSON.parse(manualSessionRaw);
+                        if (parsed && parsed.user) {
+                            console.warn("⚠️ Official library failed, but found raw session in storage. Attempting manual set...");
+                            await supabaseClient.auth.setSession({
+                                access_token: parsed.access_token,
+                                refresh_token: parsed.refresh_token
+                            });
+                            const { data: { user: forcedUser } } = await supabaseClient.auth.getUser();
+                            if (forcedUser) return forcedUser;
+                        }
+                    }
                 } catch(e) { console.error("Identity verification error:", e); }
                 return null;
             }
@@ -913,6 +947,17 @@
             } else {
                 console.error("❌ Final identity check failed after 5 seconds.");
                 sessionStorage.setItem('authDebug', 'Timed out waiting for session hydration.');
+                
+                // Final Check: Is LocalStorage even working?
+                try {
+                    localStorage.setItem('test_storage', '1');
+                    localStorage.removeItem('test_storage');
+                } catch(e) {
+                    sessionStorage.setItem('authDebug', 'CRITICAL: Browser blocking LocalStorage.');
+                    const msgEl = document.getElementById('authOverlayMessage');
+                    if (msgEl) msgEl.innerHTML = "<b>Browser Error:</b> Your browser is blocking local storage. Please disable 'Incognito' or strict privacy modes to use this app.";
+                }
+                
                 document.getElementById('authOverlay').classList.add('show');
             }
         }
@@ -1329,3 +1374,4 @@
     </script>
 </body>
 </html>
+
