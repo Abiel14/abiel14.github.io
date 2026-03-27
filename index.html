@@ -936,11 +936,15 @@ async function handleLandingPageLogin(event) {
 async function handleLandingPageSignup(event) {
     event.preventDefault();
     
+    const form = event.target;
+    const submitBtn = form.querySelector('button[type="submit"]');
+    const originalBtnText = submitBtn.textContent;
+    const errorDiv = document.getElementById('signupModalError');
+    
     const name = document.getElementById('landingSignupName').value.trim();
     const email = document.getElementById('landingSignupEmail').value.trim();
     const password = document.getElementById('landingSignupPassword').value.trim();
     const confirmPassword = document.getElementById('landingSignupConfirmPassword').value.trim();
-    const errorDiv = document.getElementById('signupModalError');
     
     if (errorDiv) errorDiv.style.display = 'none';
     
@@ -968,26 +972,48 @@ async function handleLandingPageSignup(event) {
         return;
     }
 
-    const { data, error } = await supabaseClient.auth.signUp({
-        email,
-        password,
-        options: {
-            data: { name }
+    try {
+        // Disable button to prevent multiple submissions
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Signing Up...';
+
+        const { data, error } = await supabaseClient.auth.signUp({
+            email,
+            password,
+            options: {
+                data: { name }
+            }
+        });
+        
+        if (error) {
+            if (errorDiv) {
+                // Specific messaging for rate limiting
+                if (error.message.includes('rate limit') || error.status === 429) {
+                    errorDiv.textContent = 'Too many signup attempts. Please wait a minute before trying again.';
+                } else {
+                    errorDiv.textContent = error.message;
+                }
+                errorDiv.style.display = 'block';
+            }
+            // Re-enable button on error
+            submitBtn.disabled = false;
+            submitBtn.textContent = originalBtnText;
+            return;
         }
-    });
-    
-    if (error) {
+        
+        alert('✅ Account created successfully!\n\nWelcome, ' + name + '!');
+        setTimeout(() => {
+            window.location.href = 'app.html';
+        }, 500);
+    } catch (err) {
+        console.error("Signup error:", err);
         if (errorDiv) {
-            errorDiv.textContent = error.message;
+            errorDiv.textContent = 'An unexpected error occurred. Please try again.';
             errorDiv.style.display = 'block';
         }
-        return;
+        submitBtn.disabled = false;
+        submitBtn.textContent = originalBtnText;
     }
-    
-    alert('✅ Account created successfully!\n\nWelcome, ' + name + '!');
-    setTimeout(() => {
-        window.location.href = 'app.html';
-    }, 500);
 }
 
 // ===== FEEDBACK FORM FUNCTION =====
@@ -1036,7 +1062,4 @@ console.log('✅ Website loaded successfully!');
 
 </body>
 </html>
-
-
-
 
