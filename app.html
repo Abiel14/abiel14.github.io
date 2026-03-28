@@ -667,12 +667,43 @@
             color: var(--text-main);
             padding: 10px 20px;
             border-radius: 8px;
-            font-weight: 600;
-            cursor: pointer;
+        }
+        /* Global Initial Loader */
+        .init-loader {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: var(--bg-body);
+            z-index: 10000;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            transition: opacity 0.5s ease;
+        }
+        .init-loader.hide {
+            opacity: 0;
+            pointer-events: none;
+        }
+        .loader-spinner {
+            width: 50px;
+            height: 50px;
+            border: 5px solid var(--border-color);
+            border-top: 5px solid var(--btn-primary);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
         }
     </style>
 </head>
 <body>
+
+    <div id="initLoader" class="init-loader">
+        <div class="loader-spinner"></div>
+        <div style="margin-top: 20px; font-weight: 600; color: var(--text-muted);">Syncing Your Workspace...</div>
+    </div>
 
     <div id="authOverlay" class="auth-overlay">
         <div class="auth-card">
@@ -941,17 +972,33 @@
         let realtimeChannel = null;
 
         // --- Authentication & Initialization ---
+        let isInitializing = true;
         
-        // Permanent Auth Listener
+        function logDebug(msg, data = null) {
+            const time = new Date().toLocaleTimeString();
+            const logEntry = `[${time}] ${msg} ${data ? JSON.stringify(data) : ''}`;
+            console.log(logEntry);
+            const debugEl = document.getElementById('debugInfo');
+            if (debugEl) {
+                const p = document.createElement('div');
+                p.textContent = logEntry;
+                debugEl.appendChild(p);
+            }
+        }
+
+        // Global Auth Listener
         supabaseClient.auth.onAuthStateChange(async (event, session) => {
-            console.log("🔔 Auth State Changed:", event);
+            logDebug("🔔 Auth State Changed:", event);
             if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
                 if (session) {
                     sessionUser = session.user;
                     const name = sessionUser.user_metadata?.name || 'User';
-                    document.getElementById('user-display').textContent = `👤 ${name}`;
-                    // Only switch the workspace if we are not currently initializing
-                    if (!activeWorkspaceOwnerId) {
+                    const userDisplay = document.getElementById('user-display');
+                    if (userDisplay) userDisplay.textContent = `👤 ${name}`;
+                    
+                    // If we get a session while NOT initializing (e.g., token refresh), refresh the view
+                    if (!isInitializing) {
+                        logDebug("Re-syncing workspace due to auth change...");
                         await switchWorkspace(sessionUser.id);
                     }
                 }
@@ -961,96 +1008,78 @@
         });
 
         async function initializeApp() {
-            console.log("🚀 Initializing application...");
-            let retryCount = 0;
-            const maxRetries = 10;
+            logDebug("🚀 Starting App Initialization...");
+            const loader = document.getElementById('initLoader');
             
-            // 1. CHECK URL HASH FOR SESSION (HANDOFF FROM LOGIN PAGE)
-            const hash = window.location.hash;
-            if (hash && hash.includes('access_token=') && hash.includes('refresh_token=')) {
-                console.log("📥 Caught session tokens from URL hash. Setting manual session...");
-                const params = new URLSearchParams(hash.substring(1));
-                const access_token = params.get('access_token');
-                const refresh_token = params.get('refresh_token');
+            try {
+                // 1. Check for existing session
+                const { data: { user }, error } = await supabaseClient.auth.getUser();
                 
-                if (access_token && refresh_token) {
-                    try {
-                        await supabaseClient.auth.setSession({ access_token, refresh_token });
-                        // Immediately clear the hash for security
-                        history.replaceState(null, document.title, window.location.pathname + window.location.search);
-                        console.log("✅ Manual session set, hash cleared.");
-                    } catch(e) { console.error("Error setting session from hash:", e); }
-                }
-            }
-
-            // 2. HYDRATION POLLING (STANDARD FLOW)
-            async function verifyIdentity() {
-                try {
-                    const { data: { user }, error } = await supabaseClient.auth.getUser();
-                    if (user) return user;
+                if (user) {
+                    logDebug("✅ Session found for:", user.email);
+                    sessionUser = user;
+                    activeWorkspaceOwnerId = sessionUser.id;
                     
-                    // FALLBACK: Manual LocalStorage Parsing (Deep Recovery)
-                    const slug = new URL(supabaseUrl).hostname.split('.')[0];
-                    const storageKey = `sb-${slug}-auth-token`;
-                    const manualSessionRaw = localStorage.getItem(storageKey);
-                    if (manualSessionRaw) {
-                        const parsed = JSON.parse(manualSessionRaw);
-                        if (parsed && parsed.user) {
-                            console.warn("⚠️ Found raw session in storage. Attempting manual set...");
-                            await supabaseClient.auth.setSession({
-                                access_token: parsed.access_token,
-                                refresh_token: parsed.refresh_token
-                            });
-                            const { data: { user: forcedUser } } = await supabaseClient.auth.getUser();
-                            if (forcedUser) return forcedUser;
-                        }
-                    }
-                } catch(e) { console.error("Identity verification error:", e); }
-                return null;
-            }
-
-            // Polling for the user to be ready (hydration check)
-            const user = await new Promise((resolve) => {
-                const check = async () => {
-                    retryCount++;
-                    const u = await verifyIdentity();
-                    if (u) {
-                        resolve(u);
-                    } else if (retryCount >= maxRetries) {
-                        resolve(null);
+                    // Run core setup
+                    await Promise.all([
+                        checkAndMigrateTasks(),
+                        loadSharedWorkspaces(),
+                        switchWorkspace(sessionUser.id)
+                    ]);
+                    
+                    logDebug("🎉 App Ready!");
+                    finishInit();
+                } else {
+                    logDebug("❓ No session found. Checking for tokens...");
+                    // Try to poll briefly just in case LocalStorage is slow
+                    let userRetry = await pollForUser();
+                    if (userRetry) {
+                        sessionUser = userRetry;
+                        activeWorkspaceOwnerId = sessionUser.id;
+                        await switchWorkspace(sessionUser.id);
+                        finishInit();
                     } else {
-                        setTimeout(check, 500);
+                        throw new Error("AUTHENTICATION_REQUIRED");
                     }
-                };
-                check();
-            });
-
-            if (user) {
-                console.log("✅ User verified successfully!");
-                sessionUser = user;
-                activeWorkspaceOwnerId = sessionUser.id;
-                
-                try {
-                    await checkAndMigrateTasks();
-                } catch(err) { console.error(err); }
-                
-                await loadSharedWorkspaces();
-                await switchWorkspace(sessionUser.id);
-            } else {
-                console.error("❌ Final identity check failed after 5 seconds.");
-                sessionStorage.setItem('authDebug', 'Timed out waiting for session hydration.');
-                
-                // Final Check: Is LocalStorage even working?
-                try {
-                    localStorage.setItem('test_storage', '1');
-                    localStorage.removeItem('test_storage');
-                } catch(e) {
-                    sessionStorage.setItem('authDebug', 'CRITICAL: Browser blocking LocalStorage.');
-                    const msgEl = document.getElementById('authOverlayMessage');
-                    if (msgEl) msgEl.innerHTML = "<b>Browser Error:</b> Your browser is blocking local storage. Please disable 'Incognito' or strict privacy modes to use this app.";
                 }
+            } catch (err) {
+                console.error("Initialization failed:", err);
+                logDebug("❌ Initialization Error:", err.message);
                 
-                document.getElementById('authOverlay').classList.add('show');
+                if (err.message === "AUTHENTICATION_REQUIRED") {
+                    window.location.href = "index.html";
+                } else {
+                    document.getElementById('authOverlay').classList.add('show');
+                    document.getElementById('authOverlayMessage').textContent = "We encountered a technical error while loading your data. Please check your connection and try again.";
+                }
+            } finally {
+                // Ensure loader is hidden regardless
+                if (isInitializing && !document.getElementById('authOverlay').classList.contains('show')) {
+                    // If still initializing and NO error overlay, something is stuck
+                    // hide anyway to prevent infinite loader
+                }
+            }
+        }
+
+        async function pollForUser() {
+            let retries = 0;
+            const max = 5;
+            while (retries < max) {
+                const { data: { user } } = await supabaseClient.auth.getUser();
+                if (user) return user;
+                await new Promise(r => setTimeout(r, 800));
+                retries++;
+                logDebug(`...polling for session (${retries}/${max})`);
+            }
+            return null;
+        }
+
+        function finishInit() {
+            isInitializing = false;
+            const loader = document.getElementById('initLoader');
+            if (loader) {
+                loader.classList.add('hide');
+                setTimeout(() => loader.remove(), 500);
             }
         }
 
@@ -1480,23 +1509,31 @@
         }
 
         async function loadTasks() {
-            const { data, error } = await supabaseClient
-                .from('tasks')
-                .select('*')
-                .eq('user_id', activeWorkspaceOwnerId)
-                .order('created_at', { ascending: true });
+            try {
+                const { data, error } = await supabaseClient
+                    .from('tasks')
+                    .select('*')
+                    .eq('user_id', activeWorkspaceOwnerId)
+                    .order('created_at', { ascending: true });
                 
-            document.getElementById('todo-tasks').innerHTML = "";
-            document.getElementById('inprogress-tasks').innerHTML = "";
-            document.getElementById('done-tasks').innerHTML = "";
-            
-            if(data) {
-                data.forEach(task => createTaskElement(task.title, task.status, task.id, task.priority, task.hours, task.due_date, task.description, task.assignee_email));
-            }
-            updateCounts();
-            applyCurrentFilter();
-            if (document.getElementById('dashboardView').style.display === 'block') {
-                updateDashboard();
+                if (error) throw error;
+
+                document.getElementById('todo-tasks').innerHTML = "";
+                document.getElementById('inprogress-tasks').innerHTML = "";
+                document.getElementById('done-tasks').innerHTML = "";
+                
+                if(data) {
+                    data.forEach(task => createTaskElement(task.title, task.status, task.id, task.priority, task.hours, task.due_date, task.description, task.assignee_email));
+                }
+                updateCounts();
+                applyCurrentFilter();
+                if (document.getElementById('dashboardView').style.display === 'block') {
+                    updateDashboard();
+                }
+            } catch (err) {
+                console.error("Failed to load tasks:", err);
+                logDebug("❌ Task Load Error:", err.message);
+                // Optionally show a non-intrusive alert or toast here
             }
         }
 
@@ -1544,23 +1581,31 @@
         }
 
         async function saveEditedTask() {
-            const taskId = document.getElementById('editTaskIdInput').value;
-            const title = document.getElementById('editTaskTitleInput').value.trim();
-            const desc = document.getElementById('editTaskDescInput').value.trim();
-            const priority = document.getElementById('editTaskPriorityInput').value.replace(/[^a-zA-Z]/g, '').trim(); 
-            const dueDate = document.getElementById('editTaskDueDateInput').value;
-            
-            if (!title) { alert("Please enter a task title"); return; }
-            
-            closeEditTaskModal();
-            // Realtime will handle UI refresh
-            
-            await supabaseClient.from('tasks').update({ 
-                title: title, 
-                description: desc,
-                priority: priority,
-                due_date: dueDate || null
-            }).eq('id', taskId);
+            try {
+                const taskId = document.getElementById('editTaskIdInput').value;
+                const title = document.getElementById('editTaskTitleInput').value.trim();
+                const desc = document.getElementById('editTaskDescInput').value.trim();
+                const priority = document.getElementById('editTaskPriorityInput').value.replace(/[^a-zA-Z]/g, '').trim(); 
+                const dueDate = document.getElementById('editTaskDueDateInput').value;
+                
+                if (!title) { alert("Please enter a task title"); return; }
+                
+                closeEditTaskModal();
+                
+                const { error } = await supabaseClient.from('tasks').update({ 
+                    title: title, 
+                    description: desc,
+                    priority: priority,
+                    due_date: dueDate || null
+                }).eq('id', taskId);
+
+                if (error) throw error;
+                logDebug("✅ Task update successful:", taskId);
+            } catch (err) {
+                console.error("Failed to save task:", err);
+                logDebug("❌ Task Save Error:", err.message);
+                alert("We couldn't save your changes. Please check your connection.");
+            }
         }
 
         function updateCounts() {
@@ -1577,4 +1622,5 @@
     </script>
 </body>
 </html>
+
 
