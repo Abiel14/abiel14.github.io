@@ -738,7 +738,11 @@
     <div class="board-header">
         <div class="header-left">
             <h1 class="board-title">Project Board</h1>
-            <div class="priority-filters">
+            <div class="view-toggles" style="display: flex; gap: 10px; margin-left: 15px; background: var(--bg-card); padding: 5px; border-radius: 10px; border: 1px solid var(--border-color);">
+                <button id="btnViewBoard" class="pill-filter active" onclick="setView('board')">📋 Board</button>
+                <button id="btnViewDashboard" class="pill-filter" onclick="setView('dashboard')">📊 Dashboard</button>
+            </div>
+            <div id="priorityFilterContainer" class="priority-filters">
                 <button class="pill-filter active" onclick="filterByPriority('All', this)">All</button>
                 <button class="pill-filter priority-high" onclick="filterByPriority('High', this)">High</button>
                 <button class="pill-filter priority-medium" onclick="filterByPriority('Medium', this)">Medium</button>
@@ -748,7 +752,53 @@
         <button class="btn-add-task" onclick="openTaskModal()">+ Add New Task</button>
     </div>
 
-    <div class="board">
+    <!-- Dashboard View [NEW] -->
+    <div id="dashboardView" style="display: none; padding: 20px 40px; flex-grow: 1; overflow-y: auto;">
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; margin-bottom: 30px;">
+            <div class="column" style="padding: 20px; text-align: center; height: auto; min-width: unset;">
+                <h4 style="margin-bottom: 10px; color: var(--text-muted);">Total Tasks</h4>
+                <div id="statTotalTasks" style="font-size: 36px; font-weight: bold; color: var(--btn-primary);">0</div>
+            </div>
+            <div class="column" style="padding: 20px; text-align: center; height: auto; min-width: unset;">
+                <h4 style="margin-bottom: 10px; color: var(--text-muted);">Hours Invested</h4>
+                <div id="statTotalHours" style="font-size: 36px; font-weight: bold; color: #28a745;">0.00h</div>
+            </div>
+            <div class="column" style="padding: 20px; text-align: center; height: auto; min-width: unset;">
+                <h4 style="margin-bottom: 10px; color: var(--text-muted);">Completion Rate</h4>
+                <div id="statCompletionRate" style="font-size: 36px; font-weight: bold; color: var(--priority-medium);">0%</div>
+            </div>
+        </div>
+        
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 30px;">
+            <div class="column" style="padding: 25px; height: auto;">
+                <h3 style="margin-bottom: 20px;">Task Distribution</h3>
+                <div id="distributionChart" style="display: flex; align-items: flex-end; gap: 20px; height: 200px; padding: 20px 0;">
+                    <div style="flex: 1; display: flex; flex-direction: column; align-items: center;">
+                        <div id="barTodo" style="width: 100%; background: var(--border-color); border-radius: 5px 5px 0 0; transition: height 0.5s ease; height: 10%;"></div>
+                        <span style="font-size: 12px; margin-top: 5px;">To Do</span>
+                    </div>
+                    <div style="flex: 1; display: flex; flex-direction: column; align-items: center;">
+                        <div id="barInProgress" style="width: 100%; background: var(--priority-medium); border-radius: 5px 5px 0 0; transition: height 0.5s ease; height: 10%;"></div>
+                        <span style="font-size: 12px; margin-top: 5px;">In Progress</span>
+                    </div>
+                    <div style="flex: 1; display: flex; flex-direction: column; align-items: center;">
+                        <div id="barDone" style="width: 100%; background: #28a745; border-radius: 5px 5px 0 0; transition: height 0.5s ease; height: 10%;"></div>
+                        <span style="font-size: 12px; margin-top: 5px;">Done</span>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="column" style="padding: 25px; height: auto;">
+                <h3 style="margin-bottom: 20px;">Upcoming Deadlines</h3>
+                <div id="upcomingTasks" style="display: flex; flex-direction: column; gap: 10px;">
+                    <div style="color: var(--text-muted); text-align: center; padding: 20px;">No upcoming deadlines found.</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Board View -->
+    <div id="boardView" class="board">
         <div class="column" id="todo" ondrop="drop(event)" ondragover="allowDrop(event)" ondragleave="dragLeave(event)">
             <div class="column-header">
                 <span>To Do</span>
@@ -798,12 +848,26 @@
                 <input type="text" id="taskTitleInput" placeholder="e.g. Write Introduction Section" autocomplete="off">
             </div>
             <div class="form-group">
-                <label>Priority</label>
-                <select id="taskPriorityInput">
-                    <option value="High">High 🔴</option>
-                    <option value="Medium" selected>Medium 🟠</option>
-                    <option value="Low">Low 🔵</option>
-                </select>
+                <label>Task Description</label>
+                <textarea id="taskDescInput" style="width: 100%; padding: 12px; border: 2px solid var(--border-color); border-radius: 8px; background: var(--bg-body); color: var(--text-main); font-family: inherit; font-size: 14px; outline: none; height: 80px; resize: none;" placeholder="Provide some context..."></textarea>
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                <div class="form-group">
+                    <label>Priority</label>
+                    <select id="taskPriorityInput">
+                        <option value="High">High 🔴</option>
+                        <option value="Medium" selected>Medium 🟠</option>
+                        <option value="Low">Low 🔵</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Due Date</label>
+                    <input type="date" id="taskDueDateInput">
+                </div>
+            </div>
+            <div class="form-group">
+                <label>Assignee (Email)</label>
+                <input type="email" id="taskAssigneeInput" placeholder="Enter their email or leave empty">
             </div>
             <div class="modal-actions">
                 <button class="btn-cancel" onclick="closeTaskModal()">Cancel</button>
@@ -822,12 +886,22 @@
                 <input type="text" id="editTaskTitleInput" placeholder="e.g. Write Introduction Section" autocomplete="off">
             </div>
             <div class="form-group">
-                <label>Priority</label>
-                <select id="editTaskPriorityInput">
-                    <option value="High">High 🔴</option>
-                    <option value="Medium">Medium 🟠</option>
-                    <option value="Low">Low 🔵</option>
-                </select>
+                <label>Task Description</label>
+                <textarea id="editTaskDescInput" style="width: 100%; padding: 12px; border: 2px solid var(--border-color); border-radius: 8px; background: var(--bg-body); color: var(--text-main); font-family: inherit; font-size: 14px; outline: none; height: 80px; resize: none;" placeholder="Provide some context..."></textarea>
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                <div class="form-group">
+                    <label>Priority</label>
+                    <select id="editTaskPriorityInput">
+                        <option value="High">High 🔴</option>
+                        <option value="Medium">Medium 🟠</option>
+                        <option value="Low">Low 🔵</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Due Date</label>
+                    <input type="date" id="editTaskDueDateInput">
+                </div>
             </div>
             <div class="modal-actions">
                 <button class="btn-cancel" onclick="closeEditTaskModal()">Cancel</button>
@@ -1028,6 +1102,84 @@
             setupRealtime(); // Reconnect listeners to new workspace tasks
         }
 
+        // --- View Management ---
+        function setView(view) {
+            const board = document.getElementById('boardView');
+            const dashboard = document.getElementById('dashboardView');
+            const btnBoard = document.getElementById('btnViewBoard');
+            const btnDashboard = document.getElementById('btnViewDashboard');
+            const filterContainer = document.getElementById('priorityFilterContainer');
+
+            if (view === 'board') {
+                board.style.display = 'flex';
+                dashboard.style.display = 'none';
+                btnBoard.classList.add('active');
+                btnDashboard.classList.remove('active');
+                if (filterContainer) filterContainer.style.visibility = 'visible';
+            } else {
+                board.style.display = 'none';
+                dashboard.style.display = 'block';
+                btnBoard.classList.remove('active');
+                btnDashboard.classList.add('active');
+                if (filterContainer) filterContainer.style.visibility = 'hidden';
+                updateDashboard();
+            }
+        }
+
+        function updateDashboard() {
+            // This is called when switching to dashboard or after tasks load
+            const tasks = [];
+            document.querySelectorAll('.task-card').forEach(card => {
+                tasks.push({
+                    id: card.id,
+                    status: card.closest('.column').id,
+                    priority: card.getAttribute('data-priority'),
+                    hours: parseFloat(card.querySelector('.time-display-val').getAttribute('data-hours')) || 0,
+                    dueDate: card.getAttribute('data-due') || null,
+                    title: card.querySelector('.task-title').textContent
+                });
+            });
+
+            // Basic Stats
+            const totalTasks = tasks.length;
+            const totalHours = tasks.reduce((sum, t) => sum + t.hours, 0);
+            const doneTasks = tasks.filter(t => t.status === 'done').length;
+            const completionRate = totalTasks > 0 ? Math.round((doneTasks / totalTasks) * 100) : 0;
+
+            document.getElementById('statTotalTasks').textContent = totalTasks;
+            document.getElementById('statTotalHours').textContent = totalHours.toFixed(2) + 'h';
+            document.getElementById('statCompletionRate').textContent = completionRate + '%';
+
+            // Chart
+            const todoTasks = tasks.filter(t => t.status === 'todo').length;
+            const inProgressTasks = tasks.filter(t => t.status === 'inprogress').length;
+            
+            const maxVal = Math.max(todoTasks, inProgressTasks, doneTasks, 1);
+            document.getElementById('barTodo').style.height = (todoTasks / maxVal * 100) + '%';
+            document.getElementById('barInProgress').style.height = (inProgressTasks / maxVal * 100) + '%';
+            document.getElementById('barDone').style.height = (doneTasks / maxVal * 100) + '%';
+
+            // Deadlines
+            const upcomingContainer = document.getElementById('upcomingTasks');
+            const withDeadlines = tasks.filter(t => t.dueDate && t.status !== 'done')
+                .sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate))
+                .slice(0, 5);
+
+            if (withDeadlines.length > 0) {
+                upcomingContainer.innerHTML = withDeadlines.map(t => `
+                    <div style="background: var(--bg-card); padding: 12px; border-radius: 8px; border: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center;">
+                        <div>
+                            <div style="font-weight: 600; font-size: 14px;">${t.title}</div>
+                            <div style="font-size: 12px; color: var(--priority-high);">${new Date(t.dueDate).toLocaleDateString()}</div>
+                        </div>
+                        <span class="task-priority-badge" style="font-size: 10px;">${t.priority}</span>
+                    </div>
+                `).join('');
+            } else {
+                upcomingContainer.innerHTML = '<div style="color: var(--text-muted); text-align: center; padding: 20px;">No upcoming deadlines found.</div>';
+            }
+        }
+
         function openInviteModal() {
             document.getElementById('inviteModal').classList.add('show');
             document.getElementById('inviteEmailInput').focus();
@@ -1225,25 +1377,36 @@
 
         async function saveNewTask() {
             const title = document.getElementById('taskTitleInput').value.trim();
+            const desc = document.getElementById('taskDescInput').value.trim();
             const priorityInput = document.getElementById('taskPriorityInput').value;
             const priority = priorityInput.replace(/[^a-zA-Z]/g, '').trim(); 
+            const dueDate = document.getElementById('taskDueDateInput').value;
+            const assigneeEmail = document.getElementById('taskAssigneeInput').value.trim();
             
             if (!title) { alert("Please enter a task title"); return; }
 
             const payload = {
                 user_id: activeWorkspaceOwnerId,
                 title: title,
+                description: desc,
                 status: 'todo',
                 priority: priority,
-                hours: 0
+                due_date: dueDate || null,
+                hours: 0,
+                assignee_email: assigneeEmail || null
             };
             
             const { data, error } = await supabaseClient.from('tasks').insert([payload]);
-            if (!error) closeTaskModal();
+            if (!error) {
+                closeTaskModal();
+                // We don't manually call createTaskElement because setupRealtime/loadTasks handles it
+            } else {
+                console.error("Task creation error:", error);
+                alert("Error creating task. Make sure you've updated your Supabase schema!");
+            }
         }
 
-        function createTaskElement(title, columnId, taskId, priority, hours = 0) {
-            // Remove existing if realtime duplicated it
+        function createTaskElement(title, columnId, taskId, priority, hours = 0, dueDate = null, description = '', assignee = '') {
             if(document.getElementById(taskId)) document.getElementById(taskId).remove();
             
             const card = document.createElement('div');
@@ -1252,12 +1415,26 @@
             card.draggable = true;
             card.ondragstart = drag;
             card.setAttribute('data-priority', priority);
+            if (dueDate) card.setAttribute('data-due', dueDate);
+            if (description) card.setAttribute('data-desc', description);
+            if (assignee) card.setAttribute('data-assignee', assignee);
             
+            let deadlineHtml = '';
+            if (dueDate) {
+                const dateObj = new Date(dueDate);
+                const isOverdue = dateObj < new Date() && columnId !== 'done';
+                deadlineHtml = `<div style="font-size: 11px; margin-top: 5px; color: ${isOverdue ? 'var(--priority-high)' : 'var(--text-muted)'}; font-weight: bold;">
+                    📅 Due: ${dateObj.toLocaleDateString()}
+                </div>`;
+            }
+
             card.innerHTML = `
                 <button class="btn-edit-task" onclick="openEditTaskModal('${taskId}')" title="Edit Task">✏️</button>
                 <button class="btn-delete" onclick="deleteTask('${taskId}')" title="Delete Task">×</button>
                 <div class="task-header"><div class="task-title">${title}</div></div>
                 <div><span class="task-priority-badge">${priority}</span></div>
+                ${deadlineHtml}
+                ${assignee ? `<div style="font-size: 11px; margin-top: 4px; color: var(--text-muted);">👤 ${assignee}</div>` : ''}
                 <div class="task-controls">
                     <div class="time-display">
                         <span class="timer-icon">⏱️</span>
@@ -1314,10 +1491,13 @@
             document.getElementById('done-tasks').innerHTML = "";
             
             if(data) {
-                data.forEach(task => createTaskElement(task.title, task.status, task.id, task.priority, task.hours));
+                data.forEach(task => createTaskElement(task.title, task.status, task.id, task.priority, task.hours, task.due_date, task.description, task.assignee_email));
             }
             updateCounts();
             applyCurrentFilter();
+            if (document.getElementById('dashboardView').style.display === 'block') {
+                updateDashboard();
+            }
         }
 
         // --- Filter & Edit ---
@@ -1346,10 +1526,14 @@
             if (!card) return;
             const title = card.querySelector('.task-title').textContent;
             const priority = card.getAttribute('data-priority');
+            const description = card.getAttribute('data-desc') || '';
+            const dueDate = card.getAttribute('data-due') || '';
             
             document.getElementById('editTaskIdInput').value = taskId;
             document.getElementById('editTaskTitleInput').value = title;
+            document.getElementById('editTaskDescInput').value = description;
             document.getElementById('editTaskPriorityInput').value = priority;
+            document.getElementById('editTaskDueDateInput').value = dueDate;
             
             document.getElementById('editTaskModal').classList.add('show');
             document.getElementById('editTaskTitleInput').focus();
@@ -1362,20 +1546,21 @@
         async function saveEditedTask() {
             const taskId = document.getElementById('editTaskIdInput').value;
             const title = document.getElementById('editTaskTitleInput').value.trim();
+            const desc = document.getElementById('editTaskDescInput').value.trim();
             const priority = document.getElementById('editTaskPriorityInput').value.replace(/[^a-zA-Z]/g, '').trim(); 
+            const dueDate = document.getElementById('editTaskDueDateInput').value;
             
             if (!title) { alert("Please enter a task title"); return; }
             
-            const card = document.getElementById(taskId);
-            if (card) {
-                card.querySelector('.task-title').textContent = title;
-                card.setAttribute('data-priority', priority);
-                card.querySelector('.task-priority-badge').textContent = priority;
-            }
             closeEditTaskModal();
-            applyCurrentFilter();
+            // Realtime will handle UI refresh
             
-            await supabaseClient.from('tasks').update({ title: title, priority: priority }).eq('id', taskId);
+            await supabaseClient.from('tasks').update({ 
+                title: title, 
+                description: desc,
+                priority: priority,
+                due_date: dueDate || null
+            }).eq('id', taskId);
         }
 
         function updateCounts() {
