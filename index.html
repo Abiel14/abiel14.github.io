@@ -438,6 +438,40 @@ a {
     animation: slideUp 0.3s ease-in-out;
 }
 
+.verification-notice {
+    background: #e7f3ff;
+    color: #005a9e;
+    padding: 15px;
+    border-radius: 8px;
+    margin-bottom: 20px;
+    font-size: 14px;
+    line-height: 1.6;
+    border-left: 4px solid #0078d4;
+    display: none;
+}
+
+.resend-btn {
+    background: none;
+    border: none;
+    color: #0078d4;
+    text-decoration: underline;
+    cursor: pointer;
+    font-size: 14px;
+    padding: 0;
+    margin-top: 10px;
+    font-weight: 600;
+}
+
+.resend-btn:hover {
+    color: #005a9e;
+}
+
+.resend-btn:disabled {
+    color: #999;
+    cursor: not-allowed;
+    text-decoration: none;
+}
+
 @keyframes slideUp {
     from {
         transform: translateY(50px);
@@ -926,12 +960,40 @@ async function handleLandingPageLogin(event) {
     
     if (error) {
         if (errorDiv) {
-            errorDiv.textContent = error.message;
+            console.error("Login error:", error);
+            if (error.message.includes('Email not confirmed')) {
+                errorDiv.innerHTML = `
+                    <strong>Email not confirmed.</strong><br>
+                    Please check your inbox to verify your account.<br>
+                    <button type="button" class="resend-btn" id="resendBtn" onclick="resendConfirmationEmail('${email}')">
+                        Didn't get it? Resend confirmation email
+                    </button>
+                `;
+            } else {
+                errorDiv.textContent = error.message;
+            }
             errorDiv.style.display = 'block';
         }
         return;
     }
     
+    const userRole = data.user?.role;
+    const isConfirmed = data.user?.email_confirmed_at;
+
+    if (!isConfirmed && userRole !== 'service_role') {
+        if (errorDiv) {
+            errorDiv.innerHTML = `
+                <strong>Email not confirmed.</strong><br>
+                Please check your inbox to verify your account.<br>
+                <button type="button" class="resend-btn" id="resendBtn" onclick="resendConfirmationEmail('${email}')">
+                    Didn't get it? Resend confirmation email
+                </button>
+            `;
+            errorDiv.style.display = 'block';
+        }
+        return;
+    }
+
     const userName = data.user.user_metadata?.name || 'User';
     alert('Logged in successfully!\n\nWelcome back, ' + userName + '!');
     
@@ -1008,7 +1070,25 @@ async function handleLandingPageSignup(event) {
             return;
         }
         
-        alert('✅ Account created successfully!\n\nWelcome, ' + name + '!');
+        if (!data.session) {
+            // Confirmation email is required
+            console.log("Signup successful, confirmation required.");
+            if (errorDiv) {
+                errorDiv.style.background = '#e7f3ff';
+                errorDiv.style.color = '#005a9e';
+                errorDiv.style.borderLeft = '4px solid #0078d4';
+                errorDiv.innerHTML = `
+                    <strong>✅ Account created successfully!</strong><br>
+                    A verification link has been sent to <strong>${email}</strong>.<br>
+                    Please confirm your email before logging in.
+                `;
+                errorDiv.style.display = 'block';
+            }
+            submitBtn.textContent = 'Check Your Email';
+            return;
+        }
+
+        alert('✅ Account created successfully!\n\nWelcome back, ' + name + '!');
         
         setTimeout(() => {
             window.location.href = 'app.html';
@@ -1023,6 +1103,44 @@ async function handleLandingPageSignup(event) {
         submitBtn.textContent = originalBtnText;
     }
 }
+
+async function resendConfirmationEmail(email) {
+    const resendBtn = document.getElementById('resendBtn');
+    const originalText = resendBtn ? resendBtn.textContent : 'Resend';
+    
+    try {
+        if (resendBtn) {
+            resendBtn.disabled = true;
+            resendBtn.textContent = 'Sending...';
+        }
+        
+        const { error } = await supabaseClient.auth.resend({
+            type: 'signup',
+            email: email
+        });
+        
+        if (error) throw error;
+        
+        if (resendBtn) {
+            resendBtn.textContent = '✅ Confirmation email resent!';
+            setTimeout(() => {
+                resendBtn.textContent = originalText;
+                resendBtn.disabled = false;
+            }, 5000);
+        } else {
+            alert('✅ Confirmation email resent!');
+        }
+        
+    } catch (err) {
+        console.error("Resend error:", err);
+        alert("Error resending email: " + err.message);
+        if (resendBtn) {
+            resendBtn.textContent = originalText;
+            resendBtn.disabled = false;
+        }
+    }
+}
+
 
 // ===== FEEDBACK FORM FUNCTION =====
 async function handleFeedbackSubmission(event) {
@@ -1094,5 +1212,4 @@ console.log('✅ Website loaded successfully!');
 
 </body>
 </html>
-
 
