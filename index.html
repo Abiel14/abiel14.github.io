@@ -880,6 +880,31 @@ const supabaseClient = supabase.createClient(supabaseUrl, supabaseKey, {
     }
 });
 
+// ===== EMAIL CONFIRMATION HANDLER =====
+// If this page is loaded with a confirmation token in the URL hash or query,
+// let Supabase detect and exchange it, then redirect to app.html
+(async function handleConfirmationOnLoad() {
+    const hash = window.location.hash;
+    const search = window.location.search;
+    const hasToken = hash.includes('access_token') || hash.includes('type=signup')
+                  || search.includes('token_hash') || search.includes('type=signup')
+                  || search.includes('confirmation_token');
+    
+    if (hasToken) {
+        console.log('🔑 Confirmation token detected on index.html, exchanging session...');
+        // detectSessionInUrl:true will have already processed it;
+        // just wait briefly then check session
+        await new Promise(r => setTimeout(r, 800));
+        const { data: { session } } = await supabaseClient.auth.getSession();
+        if (session) {
+            console.log('✅ Session confirmed. Redirecting to app...');
+            window.location.replace('app.html');
+        } else {
+            console.warn('⚠️ Token detected but session not established.');
+        }
+    }
+})();
+
 // ===== THEME FUNCTIONS =====
 function toggleTheme() {
     const html = document.documentElement;
@@ -1046,11 +1071,17 @@ async function handleLandingPageSignup(event) {
         submitBtn.disabled = true;
         submitBtn.textContent = 'Signing Up...';
 
+        // Build the redirect URL dynamically so it always points to the
+        // actual deployed origin, never localhost in production.
+        const redirectTo = window.location.origin + '/app.html';
+        console.log('📧 Signup redirect URL:', redirectTo);
+
         const { data, error } = await supabaseClient.auth.signUp({
             email,
             password,
             options: {
-                data: { name }
+                data: { name },
+                emailRedirectTo: redirectTo
             }
         });
         
@@ -1114,9 +1145,15 @@ async function resendConfirmationEmail(email) {
             resendBtn.textContent = 'Sending...';
         }
         
+        const redirectTo = window.location.origin + '/app.html';
+        console.log('📧 Resend redirect URL:', redirectTo);
+
         const { error } = await supabaseClient.auth.resend({
             type: 'signup',
-            email: email
+            email: email,
+            options: {
+                emailRedirectTo: redirectTo
+            }
         });
         
         if (error) throw error;
@@ -1212,4 +1249,5 @@ console.log('✅ Website loaded successfully!');
 
 </body>
 </html>
+
 
