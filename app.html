@@ -1270,20 +1270,77 @@
             const email = document.getElementById('inviteEmailInput').value.trim();
             if (!email) return;
 
-            const payload = {
-                owner_id: sessionUser.id,
-                owner_name: sessionUser.user_metadata?.name || 'User',
-                guest_email: email
-            };
+            const sendBtn = document.querySelector('#inviteModal .btn-save');
+            const originalText = sendBtn.textContent;
 
-            const { error } = await supabaseClient.from('shared_worklogs').insert([payload]);
-            if (error) {
-                if(error.code === '23505') alert('This person is already invited!');
-                else alert('Error inviting user');
-                console.error(error);
-            } else {
-                alert('Invite sent!');
-                closeInviteModal();
+            // Create inline status element if it doesn't exist
+            let statusEl = document.getElementById('inviteStatus');
+            if (!statusEl) {
+                statusEl = document.createElement('div');
+                statusEl.id = 'inviteStatus';
+                statusEl.style.cssText = 'margin-top: 12px; padding: 10px 14px; border-radius: 8px; font-size: 14px; display: none;';
+                document.querySelector('#inviteModal .modal-actions').before(statusEl);
+            }
+            statusEl.style.display = 'none';
+            sendBtn.disabled = true;
+            sendBtn.textContent = 'Sending...';
+
+            try {
+                // Step 1: Record the share in the database
+                const { error: dbError } = await supabaseClient.from('shared_worklogs').insert([{
+                    owner_id: sessionUser.id,
+                    owner_name: sessionUser.user_metadata?.name || 'User',
+                    guest_email: email
+                }]);
+
+                if (dbError) {
+                    if (dbError.code === '23505') {
+                        statusEl.style.cssText += '; background: #fff3cd; color: #856404; border-left: 4px solid #ffc107;';
+                        statusEl.textContent = 'This person is already invited to your workspace.';
+                        statusEl.style.display = 'block';
+                        sendBtn.disabled = false;
+                        sendBtn.textContent = originalText;
+                        return;
+                    }
+                    throw new Error(dbError.message);
+                }
+
+                // Step 2: Send a magic-link email so the invitee is actually notified
+                const redirectTo = window.location.origin + '/app.html';
+                console.log('Sending invite email to:', email, '| Redirect:', redirectTo);
+                const { error: otpError } = await supabaseClient.auth.signInWithOtp({
+                    email: email,
+                    options: {
+                        shouldCreateUser: true,
+                        emailRedirectTo: redirectTo
+                    }
+                });
+
+                if (otpError) {
+                    console.warn('DB row created but email failed:', otpError.message);
+                    statusEl.style.cssText += '; background: #fff3cd; color: #856404; border-left: 4px solid #ffc107;';
+                    statusEl.innerHTML = '<strong>' + email + '</strong> was added to your workspace, but the notification email failed: ' + otpError.message;
+                } else {
+                    statusEl.style.cssText += '; background: #d1fae5; color: #065f46; border-left: 4px solid #10b981;';
+                    statusEl.innerHTML = 'Invite sent! <strong>' + email + '</strong> will receive an email with a link to join your workspace.';
+                }
+                statusEl.style.display = 'block';
+                sendBtn.textContent = 'Done!';
+
+                setTimeout(() => {
+                    closeInviteModal();
+                    statusEl.style.display = 'none';
+                    sendBtn.textContent = originalText;
+                    sendBtn.disabled = false;
+                }, 3000);
+
+            } catch (err) {
+                console.error('sendInvite error:', err);
+                statusEl.style.cssText += '; background: #fee2e2; color: #991b1b; border-left: 4px solid #ef4444;';
+                statusEl.textContent = 'Error: ' + err.message;
+                statusEl.style.display = 'block';
+                sendBtn.disabled = false;
+                sendBtn.textContent = originalText;
             }
         }
 
