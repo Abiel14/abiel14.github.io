@@ -970,6 +970,9 @@
         let sessionUser = null;
         let activeWorkspaceOwnerId = null;
         let realtimeChannel = null;
+        let pollingInterval = null;       // fallback polling handle
+        let lastKnownTaskCount = -1;      // detect unexpected blank board
+        let isLoadingTasks = false;       // prevent concurrent fetches
 
         // --- Authentication & Initialization ---
         let isInitializing = true;
@@ -1168,10 +1171,12 @@
 
         async function switchWorkspace(ownerId) {
             activeWorkspaceOwnerId = ownerId;
-            document.getElementById('todo-tasks').innerHTML = "";
-            document.getElementById('inprogress-tasks').innerHTML = "";
-            document.getElementById('done-tasks').innerHTML = "";
-            document.getElementById('chatMessages').innerHTML = "";
+            lastKnownTaskCount = -1; // reset for new workspace
+            document.getElementById('todo-tasks').innerHTML = '';
+            document.getElementById('inprogress-tasks').innerHTML = '';
+            document.getElementById('done-tasks').innerHTML = '';
+            document.getElementById('chatMessages').innerHTML = '';
+            stopPolling();
             
             await loadTasks();
             await loadMessages();
@@ -1346,25 +1351,89 @@
 
         // --- Real-time Syncing ---
         function setupRealtime() {
+            // Tear down existing channel cleanly
             if (realtimeChannel) {
                 supabaseClient.removeChannel(realtimeChannel);
+                realtimeChannel = null;
             }
 
-            // We listen to ANY changes in tasks and messages, then we just soft refresh
-            realtimeChannel = supabaseClient.channel('workspace_changes')
-                .on('postgres_changes', { 
-                    event: '*', schema: 'public', table: 'tasks', filter: `user_id=eq.${activeWorkspaceOwnerId}` 
-                }, payload => {
-                    // Quickest sync: Reload task UI entirely seamlessly or selectively
-                    loadTasks();
-                })
-                .on('postgres_changes', { 
-                    event: 'INSERT', schema: 'public', table: 'messages', filter: `worklog_owner_id=eq.${activeWorkspaceOwnerId}` 
-                }, payload => {
-                    appendChatMessage(payload.new);
-                })
-                .subscribe();
+            logDebug('📡 Setting up Realtime channel...');
+
+            realtimeChannel = supabaseClient
+                .channel(`workspace_${activeWorkspaceOwnerId}`)
+                .on('postgres_changes', {
+                    event: '*', schema: 'public', table: 'tasks',
+                    filter: `user_id=eq.${activeWorkspaceOwnerId}`
+                }, () => { loadTasks(); })
+                .on('postgres_changes', {
+                    event: 'INSERT', schema: 'public', table: 'messages',
+                    filter: `worklog_owner_id=eq.${activeWorkspaceOwnerId}`
+                }, payload => { appendChatMessage(payload.new); })
+                .subscribe((status, err) => {
+                    logDebug('📡 Realtime status:', status);
+                    if (status === 'SUBSCRIBED') {
+                        logDebug('✅ Realtime connected.');
+                        updateSyncIndicator('live');
+                    } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+                        logDebug('⚠️ Realtime disconnected, will retry in 5s...', status);
+                        updateSyncIndicator('offline');
+                        // Auto-reconnect after a short delay
+                        setTimeout(() => {
+                            if (!isInitializing && sessionUser) {
+                                logDebug('🔄 Reconnecting Realtime...');
+                                setupRealtime();
+                                loadTasks(); // also re-fetch in case we missed events
+                            }
+                        }, 5000);
+                    }
+                });
+
+            // Start polling fallback (every 90s) in case Realtime silently dies
+            startPolling();
         }
+
+        function startPolling() {
+            if (pollingInterval) clearInterval(pollingInterval);
+            pollingInterval = setInterval(async () => {
+                if (!sessionUser || isInitializing) return;
+                logDebug('⏱️ Polling: refreshing tasks...');
+                await loadTasks();
+            }, 90_000);
+        }
+
+        function stopPolling() {
+            if (pollingInterval) { clearInterval(pollingInterval); pollingInterval = null; }
+        }
+
+        // Sync indicator — small dot in the navbar showing live/offline status
+        function updateSyncIndicator(state) {
+            let dot = document.getElementById('syncDot');
+            if (!dot) {
+                dot = document.createElement('span');
+                dot.id = 'syncDot';
+                dot.title = 'Sync status';
+                dot.style.cssText = 'display:inline-block;width:8px;height:8px;border-radius:50%;margin-left:6px;vertical-align:middle;transition:background 0.4s';
+                const userDisplay = document.getElementById('user-display');
+                if (userDisplay) userDisplay.appendChild(dot);
+            }
+            dot.style.background = state === 'live' ? '#22c55e' : '#f59e0b';
+            dot.title = state === 'live' ? 'Real-time connected' : 'Real-time reconnecting...';
+        }
+
+        // Re-sync whenever the user comes back to the tab
+        document.addEventListener('visibilitychange', async () => {
+            if (document.visibilityState === 'visible' && sessionUser && !isInitializing) {
+                logDebug('👁️ Tab visible again — refreshing data...');
+                await loadTasks();
+                // If channel is dead, re-subscribe
+                if (!realtimeChannel ||
+                    realtimeChannel.state === 'closed' ||
+                    realtimeChannel.state === 'errored') {
+                    logDebug('🔄 Realtime was dead, reconnecting...');
+                    setupRealtime();
+                }
+            }
+        });
 
         // --- Chat System ---
         function toggleChat() {
@@ -1613,6 +1682,10 @@
         }
 
         async function loadTasks() {
+            // Prevent overlapping fetches
+            if (isLoadingTasks) return;
+            isLoadingTasks = true;
+
             try {
                 const { data, error } = await supabaseClient
                     .from('tasks')
@@ -1622,23 +1695,81 @@
                 
                 if (error) throw error;
 
-                document.getElementById('todo-tasks').innerHTML = "";
-                document.getElementById('inprogress-tasks').innerHTML = "";
-                document.getElementById('done-tasks').innerHTML = "";
+                // ✅ Only wipe the board AFTER a successful fetch — never on error
+                // Preserve running timers across re-renders
+                const runningTimers = Object.keys(timers);
+
+                document.getElementById('todo-tasks').innerHTML = '';
+                document.getElementById('inprogress-tasks').innerHTML = '';
+                document.getElementById('done-tasks').innerHTML = '';
                 
-                if(data) {
-                    data.forEach(task => createTaskElement(task.title, task.status, task.id, task.priority, task.hours, task.due_date, task.description, task.assignee_email));
+                if (data) {
+                    data.forEach(task => {
+                        // If a timer is running for this task, don't reset its hours display
+                        const isTimerRunning = runningTimers.includes(task.id);
+                        createTaskElement(
+                            task.title, task.status, task.id, task.priority,
+                            isTimerRunning ? null : task.hours,  // keep live hours if timer running
+                            task.due_date, task.description, task.assignee_email
+                        );
+                        // Re-apply running timer state to restored card
+                        if (isTimerRunning) {
+                            const btn = document.querySelector(`#${task.id} .btn-timer`);
+                            if (btn) { btn.innerHTML = '⏸ Stop'; btn.classList.add('running'); }
+                        }
+                    });
+                    lastKnownTaskCount = data.length;
                 }
+
                 updateCounts();
                 applyCurrentFilter();
                 if (document.getElementById('dashboardView').style.display === 'block') {
                     updateDashboard();
                 }
+                logDebug(`✅ Tasks loaded: ${data ? data.length : 0}`);
             } catch (err) {
-                console.error("Failed to load tasks:", err);
-                logDebug("❌ Task Load Error:", err.message);
-                // Optionally show a non-intrusive alert or toast here
+                console.error('Failed to load tasks:', err);
+                logDebug('❌ Task Load Error:', err.message);
+
+                // Show a subtle toast instead of wiping the board
+                showToast('⚠️ Could not refresh tasks — showing last known data.', 'warning');
+
+                // If the board is already empty and we know there were tasks, something is very wrong
+                const visibleCards = document.querySelectorAll('.task-card').length;
+                if (visibleCards === 0 && lastKnownTaskCount > 0) {
+                    logDebug('🚨 Board went blank unexpectedly! Task count was:', lastKnownTaskCount);
+                }
+            } finally {
+                isLoadingTasks = false;
             }
+        }
+
+        // Non-intrusive toast notification
+        function showToast(message, type = 'info') {
+            let toast = document.getElementById('syncToast');
+            if (!toast) {
+                toast = document.createElement('div');
+                toast.id = 'syncToast';
+                toast.style.cssText = [
+                    'position:fixed', 'bottom:80px', 'left:50%', 'transform:translateX(-50%)',
+                    'padding:10px 20px', 'border-radius:8px', 'font-size:14px', 'font-weight:600',
+                    'box-shadow:0 4px 12px rgba(0,0,0,0.2)', 'z-index:9000',
+                    'transition:opacity 0.4s ease', 'opacity:0', 'pointer-events:none'
+                ].join(';');
+                document.body.appendChild(toast);
+            }
+            const colors = {
+                info:    { bg: '#1e40af', fg: '#fff' },
+                warning: { bg: '#92400e', fg: '#fff' },
+                success: { bg: '#065f46', fg: '#fff' }
+            };
+            const c = colors[type] || colors.info;
+            toast.style.background = c.bg;
+            toast.style.color = c.fg;
+            toast.textContent = message;
+            toast.style.opacity = '1';
+            clearTimeout(toast._hideTimer);
+            toast._hideTimer = setTimeout(() => { toast.style.opacity = '0'; }, 3000);
         }
 
         // --- Filter & Edit ---
